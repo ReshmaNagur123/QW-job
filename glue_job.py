@@ -1114,38 +1114,50 @@ def run_job(fpls, connection):
     # both join sites, eliminating the duplicate window operation that
     # eaddr_df_norm previously performed over the same 3.2M-row table.
     eaddr_deduped = eaddr_df \
-        .withColumn("_addr1", upper(trim(col("addr1")))) \
-        .withColumn("_city",  upper(trim(col("city")))) \
-        .withColumn("_state", upper(trim(col("state")))) \
-        .withColumn("_zip5",  upper(trim(col("zip5")))) \
+        .withColumn("_addr1", upper(trim(coalesce(col("addr1"), lit(""))))) \
+        .withColumn("_addr2", upper(trim(coalesce(col("addr2"), lit(""))))) \
+        .withColumn("_addr3", upper(trim(coalesce(col("addr3"), lit(""))))) \
+        .withColumn("_city", upper(trim(coalesce(col("city"), lit(""))))) \
+        .withColumn("_state", upper(trim(coalesce(col("state"), lit(""))))) \
+        .withColumn("_zip5", upper(trim(coalesce(col("zip5"), lit(""))))) \
+        .withColumn("_zip4", coalesce(col("zip4"), lit(""))) \
         .withColumn("_rn", row_number().over(
             Window.partitionBy(
-                "empr_id", "_addr1", "_city", "_state", "_zip5"
+                "empr_id", "_addr1", "_addr2", "_addr3", "_city",
+                "_state", "_zip5", "_zip4"
             ).orderBy(col("addr_snum").desc())
         )) \
         .filter(col("_rn") == 1) \
         .drop("_rn") \
         .withColumnRenamed("_addr1", "addr1_norm") \
+        .withColumnRenamed("_addr2", "addr2_norm") \
+        .withColumnRenamed("_addr3", "addr3_norm") \
         .withColumnRenamed("_city", "city_norm") \
         .withColumnRenamed("_state", "state_norm") \
         .withColumnRenamed("_zip5", "zip5_norm") \
+        .withColumnRenamed("_zip4", "zip4_norm") \
         .cache()
 
     # Pre-normalize non_pseudo_with_name for join
     non_pseudo_with_name = non_pseudo_with_name \
-        .withColumn("addr1_norm", upper(trim(col("addr1")))) \
-        .withColumn("city_norm", upper(trim(col("city")))) \
-        .withColumn("state_norm", upper(trim(col("state")))) \
-        .withColumn("zip5_norm", upper(trim(col("zip5"))))
+        .withColumn("addr1_norm", upper(trim(coalesce(col("addr1"), lit(""))))) \
+        .withColumn("addr2_norm", upper(trim(coalesce(col("addr2"), lit(""))))) \
+        .withColumn("addr3_norm", upper(trim(coalesce(col("addr3"), lit(""))))) \
+        .withColumn("city_norm", upper(trim(coalesce(col("city"), lit(""))))) \
+        .withColumn("state_norm", upper(trim(coalesce(col("state"), lit(""))))) \
+        .withColumn("zip5_norm", upper(trim(coalesce(col("zip5"), lit(""))))) \
+        .withColumn("zip4_norm", coalesce(col("zip4"), lit("")))
 
     addr_match = non_pseudo_with_name.join(
         eaddr_deduped,
         (non_pseudo_with_name.work_ein == eaddr_deduped.empr_id)
-        & (trim(non_pseudo_with_name.addr1) != "")
         & (non_pseudo_with_name.addr1_norm == eaddr_deduped.addr1_norm)
+        & (non_pseudo_with_name.addr2_norm == eaddr_deduped.addr2_norm)
+        & (non_pseudo_with_name.addr3_norm == eaddr_deduped.addr3_norm)
         & (non_pseudo_with_name.city_norm == eaddr_deduped.city_norm)
         & (non_pseudo_with_name.state_norm == eaddr_deduped.state_norm)
-        & (non_pseudo_with_name.zip5_norm == eaddr_deduped.zip5_norm),
+        & (non_pseudo_with_name.zip5_norm == eaddr_deduped.zip5_norm)
+        & (non_pseudo_with_name.zip4_norm == eaddr_deduped.zip4_norm),
         "left",
     ).select(
         non_pseudo_with_name["*"],
@@ -1172,13 +1184,17 @@ def run_job(fpls, connection):
         addr_match.filter(col("matched_addr_snum").isNull())
         .select(
             "work_ein",
-            "addr1",
+            "addr1", "addr2", "addr3",
             "city",
             "state",
             "zip5",
+            "zip4",
             "input_order",
         )
-        .dropDuplicates(["work_ein", "addr1", "city", "state", "zip5"])
+        .dropDuplicates(
+            ["work_ein", "addr1", "addr2", "addr3", "city", "state",
+             "zip5", "zip4"]
+        )
         .withColumn("addr_type", lit("primary"))
     )
 
@@ -1215,12 +1231,14 @@ def run_job(fpls, connection):
     ).alias("pseudo_feins")
 
     window_first_occurrence = Window.partitionBy(
-        "work_ein", "addr1", "city", "state", "zip5"
+        "work_ein", "addr1", "addr2", "addr3", "city", "state",
+        "zip5", "zip4"
     ).orderBy("input_order")
     addr_with_seq = (
         addr_match.join(
             new_addrs_with_seq,
-            ["work_ein", "addr1", "city", "state", "zip5"],
+            ["work_ein", "addr1", "addr2", "addr3", "city", "state",
+             "zip5", "zip4"],
             "left",
         )
         .join(
@@ -1278,10 +1296,25 @@ def run_job(fpls, connection):
 
     # Pre-normalize optional address fields for join
     addr_with_seq = addr_with_seq \
-        .withColumn("opt_addr1_norm", upper(trim(col("opt_addr1")))) \
-        .withColumn("opt_city_norm", upper(trim(col("opt_city")))) \
-        .withColumn("opt_state_norm", upper(trim(col("opt_state")))) \
-        .withColumn("opt_zip5_norm", upper(trim(col("opt_zip5"))))
+        .withColumn(
+            "opt_addr1_norm", upper(trim(coalesce(col("opt_addr1"), lit(""))))
+        ) \
+        .withColumn(
+            "opt_addr2_norm", upper(trim(coalesce(col("opt_addr2"), lit(""))))
+        ) \
+        .withColumn(
+            "opt_addr3_norm", upper(trim(coalesce(col("opt_addr3"), lit(""))))
+        ) \
+        .withColumn(
+            "opt_city_norm", upper(trim(coalesce(col("opt_city"), lit(""))))
+        ) \
+        .withColumn(
+            "opt_state_norm", upper(trim(coalesce(col("opt_state"), lit(""))))
+        ) \
+        .withColumn(
+            "opt_zip5_norm", upper(trim(coalesce(col("opt_zip5"), lit(""))))
+        ) \
+        .withColumn("opt_zip4_norm", coalesce(col("opt_zip4"), lit("")))
 
     # Reuse eaddr_deduped (already normalized and deduped above) for the
     # optional address join, eliminating the second window pass over eaddr_df.
@@ -1290,10 +1323,17 @@ def run_job(fpls, connection):
         .join(
             eaddr_deduped.alias("eaddr_lookup"),
             (col("addr_seq.work_ein") == col("eaddr_lookup.empr_id"))
-            & (trim(col("addr_seq.opt_addr1")) != "")
             & (
                 col("addr_seq.opt_addr1_norm")
                 == col("eaddr_lookup.addr1_norm")
+            )
+            & (
+                col("addr_seq.opt_addr2_norm")
+                == col("eaddr_lookup.addr2_norm")
+            )
+            & (
+                col("addr_seq.opt_addr3_norm")
+                == col("eaddr_lookup.addr3_norm")
             )
             & (
                 col("addr_seq.opt_city_norm")
@@ -1306,6 +1346,10 @@ def run_job(fpls, connection):
             & (
                 col("addr_seq.opt_zip5_norm")
                 == col("eaddr_lookup.zip5_norm")
+            )
+            & (
+                col("addr_seq.opt_zip4_norm")
+                == col("eaddr_lookup.zip4_norm")
             ),
             "left",
         )
@@ -1318,9 +1362,12 @@ def run_job(fpls, connection):
     window_opt = Window.partitionBy(
         "work_ein",
         "opt_addr1",
+        "opt_addr2",
+        "opt_addr3",
         "opt_city",
         "opt_state",
         "opt_zip5",
+        "opt_zip4",
     ).orderBy("input_order")
     opt_with_rank = opt_addr_match.withColumn(
         "opt_rank",
@@ -1342,14 +1389,23 @@ def run_job(fpls, connection):
         opt_with_rank.filter(
             (col("matched_opt_snum").isNull())
             & (col("opt_rank") == 1)
-            & (trim(col("opt_addr1")) != "")
+            & (
+                ~(
+                    (trim(coalesce(col("opt_addr1"), lit(""))) == "")
+                    & (trim(coalesce(col("opt_addr2"), lit(""))) == "")
+                    & (trim(coalesce(col("opt_addr3"), lit(""))) == "")
+                )
+            )
         )
         .select(
             col("work_ein"),
             col("opt_addr1").alias("addr1"),
+            col("opt_addr2").alias("addr2"),
+            col("opt_addr3").alias("addr3"),
             col("opt_city").alias("city"),
             col("opt_state").alias("state"),
             col("opt_zip5").alias("zip5"),
+            col("opt_zip4").alias("zip4"),
         )
         # FIX: exclude optional addresses that are already being inserted
         # as primary addresses in this same run. Without this filter,
@@ -1357,9 +1413,11 @@ def run_job(fpls, connection):
         # (one from primary path, one from optional path).
         .join(
             new_addrs_with_seq.select(
-                "work_ein", "addr1", "city", "state", "zip5"
+                "work_ein", "addr1", "addr2", "addr3", "city", "state",
+                "zip5", "zip4"
             ),
-            ["work_ein", "addr1", "city", "state", "zip5"],
+            ["work_ein", "addr1", "addr2", "addr3", "city", "state",
+             "zip5", "zip4"],
             "left_anti",
         )
         .distinct()
@@ -1397,6 +1455,9 @@ def run_job(fpls, connection):
         .withColumnRenamed("city", "opt_city")
         .withColumnRenamed("state", "opt_state")
         .withColumnRenamed("zip5", "opt_zip5")
+        .withColumnRenamed("addr2", "opt_addr2")
+        .withColumnRenamed("addr3", "opt_addr3")
+        .withColumnRenamed("zip4", "opt_zip4")
     )
 
     final_df = (
@@ -1405,9 +1466,12 @@ def run_job(fpls, connection):
             [
                 "work_ein",
                 "opt_addr1",
+                "opt_addr2",
+                "opt_addr3",
                 "opt_city",
                 "opt_state",
                 "opt_zip5",
+                "opt_zip4",
             ],
             "left",
         )
@@ -2444,6 +2508,13 @@ def run_job(fpls, connection):
         final_df_to_write
         .filter(col("empr_addr_pntr") > 0)
         .filter(col("empr_table_ind") != "O")
+        .filter(
+            ~(
+                (trim(coalesce(col("addr1"), lit(""))) == "")
+                & (trim(coalesce(col("addr2"), lit(""))) == "")
+                & (trim(coalesce(col("addr3"), lit(""))) == "")
+            )
+        )
         .select(
             col("work_ein").alias("empr_id"),
             col("empr_addr_pntr").alias("addr_snum"),
@@ -2797,9 +2868,13 @@ def run_job(fpls, connection):
     # records (only those with a non-blank opt_addr1 and empr_opt_addr_pntr>0)
     # so its cache footprint is much smaller than the full DataFrame.
     final_df_with_opt = final_df_to_write.filter(
-        (trim(col("opt_addr1")) != "")
-        & (col("empr_opt_addr_pntr") > 0)
+        (col("empr_opt_addr_pntr") > 0)
         & (col("empr_table_ind") != "O")
+        & ~(
+            (trim(coalesce(col("opt_addr1"), lit(""))) == "")
+            & (trim(coalesce(col("opt_addr2"), lit(""))) == "")
+            & (trim(coalesce(col("opt_addr3"), lit(""))) == "")
+        )
     ).cache()
     if final_df_with_opt.limit(1).count() > 0:
         eaddr_opt = (
