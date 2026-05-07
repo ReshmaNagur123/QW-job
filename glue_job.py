@@ -1351,6 +1351,17 @@ def run_job(fpls, connection):
             col("opt_state").alias("state"),
             col("opt_zip5").alias("zip5"),
         )
+        # FIX: exclude optional addresses that are already being inserted
+        # as primary addresses in this same run. Without this filter,
+        # the same physical address gets two different addr_snum values
+        # (one from primary path, one from optional path).
+        .join(
+            new_addrs_with_seq.select(
+                "work_ein", "addr1", "city", "state", "zip5"
+            ),
+            ["work_ein", "addr1", "city", "state", "zip5"],
+            "left_anti",
+        )
         .distinct()
         .withColumn("addr_type", lit("optional"))
         .withColumn("input_order", lit(999999999))
@@ -1400,9 +1411,24 @@ def run_job(fpls, connection):
             ],
             "left",
         )
+        # FIX: also look up new primary snums in case the optional address
+        # matches a primary address being inserted in this same run.
+        .join(
+            new_addrs_with_seq.select(
+                col("work_ein"),
+                col("addr1").alias("opt_addr1"),
+                col("city").alias("opt_city"),
+                col("state").alias("opt_state"),
+                col("zip5").alias("opt_zip5"),
+                col("new_addr_snum").alias("primary_match_snum"),
+            ),
+            ["work_ein", "opt_addr1", "opt_city", "opt_state", "opt_zip5"],
+            "left",
+        )
         .withColumn(
             "empr_opt_addr_pntr",
             when(col("matched_opt_snum").isNotNull(), col("matched_opt_snum"))
+            .when(col("primary_match_snum").isNotNull(), col("primary_match_snum"))
             .when(col("new_opt_snum").isNotNull(), col("new_opt_snum"))
             .otherwise(lit(0)),
         )
@@ -1427,6 +1453,7 @@ def run_job(fpls, connection):
             "opt_rank",
             "matched_opt_snum",
             "new_opt_snum",
+            "primary_match_snum",
             "empr_name_ind_preserved",
         )
     )
