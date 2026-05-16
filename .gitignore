@@ -1,0 +1,8 @@
+# Ruflo / Claude Flow runtime state (machine-specific, do not commit)
+.claude-flow/daemon.pid
+.claude-flow/daemon.log
+.claude-flow/daemon-state.json
+.claude-flow/metrics/codebase-map.json
+.claude/memory.db
+.swarm/
+ruvector.db
