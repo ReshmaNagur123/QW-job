@@ -52,6 +52,8 @@ from awsglue.context import GlueContext
 from awsglue.job import Job
 from fplslib import Fpls
 
+from qw_helpers import generate_output_filename
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -2038,29 +2040,7 @@ def run_job(fpls, connection):
     input_file_key = input_objects[0].key
     input_filename = input_file_key.split("/")[-1]
     LOGGER.info(f"[INPUT] Input filename: '{input_filename}'")
-    # Remove any extension first
-    base_name = (
-        input_filename.rsplit(".", 1)[0]
-        if "." in input_filename
-        else input_filename
-    )
-    # Fixed prefix for output filename
-    fixed_prefix = "NDNHI.FPLS.NDNH.QWDATA.EVS.RESP"
-    # Find .Ryymmdd.Thhmmss or .Ryymmdd pattern and insert .SEQIDS
-    match_full = re.search(r"(\.R\d{6}\.T\d{6})$", base_name)
-    match_date = re.search(r"(\.R\d{6})$", base_name)
-    if match_full:
-        timestamp_part = match_full.group(1)
-        output_filename = f"{fixed_prefix}.SEQIDS{timestamp_part}.parquet"
-    elif match_date:
-        date_part = match_date.group(1)
-        current_time = datetime.now().strftime(".T%H%M%S")
-        output_filename = (
-            f"{fixed_prefix}.SEQIDS{date_part}{current_time}.parquet"
-        )
-    else:
-        timestamp = datetime.now().strftime(".R%y%m%d.T%H%M%S")
-        output_filename = f"{fixed_prefix}.SEQIDS{timestamp}.parquet"
+    output_filename = generate_output_filename(input_filename)
     LOGGER.info(f"Output filename: '{output_filename}'")
 
     section_start = time.time()

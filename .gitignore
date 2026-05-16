@@ -1,3 +1,8 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
 # Ruflo / Claude Flow runtime state (machine-specific, do not commit)
 .claude-flow/daemon.pid
 .claude-flow/daemon.log
